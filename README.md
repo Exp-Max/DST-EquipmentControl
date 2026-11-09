@@ -4,6 +4,7 @@
 
 ## 来源与版权
 
+- 上游仓库：[DSTBoas/Equipment-Control](https://github.com/DSTBoas/Equipment-Control)（默认分支 `master`，MIT License）。
 - 原模组作者：**DSTBoas**，原始代码 `Copyright (c) 2020 DSTBoas`，采用 **MIT License**。
 - 上游版权声明与许可全文保留在 [`LICENSE`](LICENSE)，请勿删除或替换；`modinfo.lua` 中的 `author = "Boas"` 也保持不变。
 - 本仓库由 **Exp-Max** 自 2026 年起维护修改，改动内容见 [`CHANGELOG.md`](CHANGELOG.md)；新增与修改部分同样按 MIT License 提供。
