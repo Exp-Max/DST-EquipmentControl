@@ -63,6 +63,11 @@ function ItemUtil:GetClassified(item)
     return item and item.replica.inventoryitem and item.replica.inventoryitem.classified
 end
 
+-- 物品实体的标签查询（玩家实体标签走 PlayerUtil:HasTag）
+function ItemUtil:HasTag(item, tag)
+    return item ~= nil and item:HasTag(tag)
+end
+
 function ItemUtil:GetPerish(item)
     local classified = self:GetClassified(item)
     return classified and classified.perish:value() / 62 or 0
@@ -270,12 +275,16 @@ end
 
 -- ===== FOOD =====
 
+-- 角色 prefab 只用于索引官方 TUNING 的 <PREFAB>_FOOD_MULT 命名规则（tuning.lua:4540），
+-- 不用于任何能力判定；能力一律走官方网络同步标签。
 local function GetFoodTraitCharacter()
     return ThePlayer and ThePlayer.prefab
 end
 
+-- components/edible.lua:99/125 的 ignore_spoilage 等价于官方 ignoresspoilage 标签
+-- （eater.lua:113-115；客户端 componentactions.lua:1167/1193 也读它）。
 local function IsSpoilingFood(cachedItem, val)
-    return GetFoodTraitCharacter() ~= "wx78"
+    return not (ThePlayer and ThePlayer:HasTag("ignoresspoilage"))
         and cachedItem.edible.degrades_with_spoilage
         and val > 0
 end
@@ -288,32 +297,34 @@ local function GetFoodState(item)
         or FOODSTATES.FRESH
 end
 
+-- 腐败倍率一律取官方 TUNING：默认 STALE/SPOILED_FOOD_*；
+-- wickerbottom.lua:75-76 覆盖 eater.stale_hunger/stale_health，客机按角色标签取专属前缀。
+local function GetSpoilagePrefix()
+    return ThePlayer and ThePlayer:HasTag("bookbuilder") and "WICKERBOTTOM_" or ""
+end
+
 local function ApplySpoilage(val, cachedItem, item, attr)
     if not IsSpoilingFood(cachedItem, val) then
         return val
     end
+    local prefix = GetSpoilagePrefix()
     local foodState = GetFoodState(item)
     if foodState == FOODSTATES.STALE then
-        return val * (GetFoodTraitCharacter() == "wickerbottom"
-            and TUNING["WICKERBOTTOM_STALE_FOOD_" .. attr]
-            or TUNING["STALE_FOOD_" .. attr])
+        return val * (TUNING[prefix .. "STALE_FOOD_" .. attr] or TUNING["STALE_FOOD_" .. attr])
     elseif foodState == FOODSTATES.SPOILED then
-        return val * (GetFoodTraitCharacter() == "wickerbottom"
-            and TUNING["WICKERBOTTOM_SPOILED_FOOD_" .. attr]
-            or TUNING["SPOILED_FOOD_" .. attr])
+        return val * (TUNING[prefix .. "SPOILED_FOOD_" .. attr] or TUNING["SPOILED_FOOD_" .. attr])
     end
     return val
 end
 
 function ItemUtil:GetFoodMultiplier()
-    if ThePlayer.prefab == "wortox" then
-        return 0.5
-    end
-    return TUNING[ThePlayer.prefab:upper() .. "_FOOD_MULT"] or 1
+    local prefab = GetFoodTraitCharacter()
+    if not prefab then return 1 end
+    return TUNING[prefab:upper() .. "_FOOD_MULT"] or 1
 end
 
 function ItemUtil:GetHunger(item)
-    if item:HasTag("soul") and ThePlayer:HasTag("souleater") then
+    if item:HasTag("soul") and ThePlayer and ThePlayer:HasTag("souleater") then
         return TUNING.CALORIES_MEDSMALL
     end
     local cachedItem = self:GetCachedItem(item)
@@ -329,9 +340,11 @@ function ItemUtil:GetHealth(item)
     if cachedItem and cachedItem.healer then
         return cachedItem.healer.health
     end
-    if not (cachedItem and cachedItem.edible and GetFoodTraitCharacter() ~= "wormwood") then
+    if not (cachedItem and cachedItem.edible) then
         return 0
     end
+    -- 官方 wormwood.lua:800 SetAbsorptionModifiers(0,1,1)：食物不回血
+    if ThePlayer and ThePlayer:HasTag("plantkin") then return 0 end
     local health = ApplySpoilage(cachedItem.edible.healthvalue, cachedItem, item, "HEALTH")
     return math.ceil(health * self:GetFoodMultiplier())
 end
@@ -349,6 +362,8 @@ local function HasFoodType(item, foodtypes)
     return false
 end
 
+-- 与官方客户端 EAT 动作收集同款（componentactions.lua:2672-2688）：
+-- FOODGROUP 用 <name>_eater + edible_<type>，FOODTYPE 用 <type>_eater + edible_<type>。
 local function CheckDietTags(item, categories)
     if type(categories) ~= "table" then
         return false, false
@@ -356,21 +371,15 @@ local function CheckDietTags(item, categories)
     for _, v in pairs(categories) do
         local tag = type(v) == "table" and v.name or v
         -- 分类项非字符串会触发 tag.."_eater" 拼接抛错，使整类食物判定崩溃，故一并挡掉
-        if type(tag) == "string" and ThePlayer:HasTag(tag .. "_eater") then
+        if type(tag) == "string" and ThePlayer and ThePlayer:HasTag(tag .. "_eater") then
             return true, HasFoodType(item, { v })
         end
     end
     return false, false
 end
 
-local PREFER_EATING_TYPES = {
-    valkyrie = { FOODTYPE.MEAT, FOODTYPE.GOODIES },
-}
-local PREFER_EATING_TAGS = {
-    masterchef = { "preparedfood", "pre-preparedfood" },
-}
-
 function ItemUtil:CanEat(item)
+    if not ThePlayer then return false end
     if ThePlayer:HasTag("souleater") and item:HasTag("soul") then
         return true
     end
@@ -399,18 +408,6 @@ function ItemUtil:CanEat(item)
 
     if ThePlayer:HasTag("nospoiledfood") then
         if self:IsPerishSpoiled(item) then
-            return false
-        end
-    end
-
-    for tag, types in pairs(PREFER_EATING_TYPES) do
-        if ThePlayer:HasTag(tag) and not HasFoodType(item, types) then
-            return false
-        end
-    end
-
-    for tag, tags in pairs(PREFER_EATING_TAGS) do
-        if ThePlayer:HasTag(tag) and not item:HasAnyTag(tags) then
             return false
         end
     end

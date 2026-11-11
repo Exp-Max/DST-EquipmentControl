@@ -1013,6 +1013,17 @@ function ConfigHUD:DoFocusHookups()
     end
 end
 
+-- 本面板只用鼠标点击/悬停，不参与任何键盘或手柄的方向焦点导航。
+-- DST 把按住的 WASD(CONTROL_MOVE_*) 同时当作 UI 方向键，FrontEnd 每帧据此
+-- 调用 OnFocusMove (frontend.lua:863-870)；而 Grid 的格子自带 focus_flow
+-- (grid.lua:60-76)，一旦走基类，选中框就跟着 WASD 跑，OnFocusMove 返回 true
+-- 还会关掉 tracking_mouse (frontend.lua:407-410)，鼠标光标也随之进入键盘导航态。
+-- 官方制作菜单靠 crafting_navigation_mode 把 WASD 排除在导航之外；这里不做
+-- 手柄/方向键适配，直接让本面板永远不接管方向焦点移动。
+function ConfigHUD:OnFocusMove()
+    return false
+end
+
 function ConfigHUD:OnControl(control, down)
     if self.is_open then
         -- 面板展开：子配置网格优先，再分类格，再基类
@@ -1045,11 +1056,10 @@ function ConfigHUD:SetOpen(is_open)
         end
         self.root:MoveTo(self.closed_pos, self.opened_pos, MOVE_TIME)
         TheFocalPoint.SoundEmitter:PlaySound("dontstarve/HUD/craft_open")
-        -- 展开后置默认焦点到分类格首格（同制作菜单打开后焦点落到筛选格）
-        if self.cat_widgets ~= nil and #self.cat_widgets > 0 then
-            self.cat_widgets[1]:SetFocus()
-        end
+        -- 不设默认焦点：纯鼠标面板，焦点只由鼠标悬停/点击产生。
+        -- 原来无条件 SetFocus() 把焦点钉在分类格上，WASD 立刻能沿 Grid 挪动它。
     else
+        self:ClearFocus()   -- 收起时清掉面板内残留焦点，避免继续挂在前台焦点链上
         self.root:MoveTo(self.root:GetPosition(), self.closed_pos, MOVE_TIME, function()
             self.body:Hide()
         end)

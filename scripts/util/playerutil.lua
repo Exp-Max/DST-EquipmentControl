@@ -8,9 +8,20 @@
 -- 事件来源：player_common.lua、player_common_extensions.lua、player_classified.lua、playercontroller.lua
 
 local ItemUtil = require "util/itemutil"
+local InventoryUtil = require "util/inventoryutil"
+local WorldUtil = require "util/worldutil"
 
 -- 威胁检测范围（带 _combat 且攻击目标为 ThePlayer 的实体）
 local THREAT_RANGE = 30
+-- 官方客户端找攻击目标用的排除标签（scripts/components/playercontroller.lua:1782）：
+-- 物品栏/容器内的生物由 EntityScript:RemoveFromScene() 打上 INLIMBO 离开场景，
+-- 但仍带 _combat，且 replica.combat 的目标可能残留为玩家，不能再算作正在攻击的威胁。
+local THREAT_CANT_TAGS = { "INLIMBO" }
+-- 官方玩家 LightWatcher:SetLightThresh(.075)（scripts/prefabs/player_common.lua:2446）：
+-- 低于该阈值即处于黑暗、会被鬼手攻击；用于校验"举着的光源是否真的在发光"。
+local LIGHT_THRESH = 0.075
+-- 举着同一盏光源时，合成照度相对基线的增量只能来自外部光/天光增强。
+local EXTERNAL_LIGHT_DELTA = 0.1
 
 local fns = {}
 
@@ -27,6 +38,8 @@ local PlayerUtil = Class(function(self)
     self._event_callbacks = {}
     self._bound_player = nil
     self._client_fake_lights = nil
+    self._light_baseline_item = nil
+    self._light_baseline = nil
 end)
 
 -- =============================================
@@ -389,6 +402,21 @@ fns.GetMoisture = function(inst)
         return inst.components.moisture:GetMoisture()
     elseif inst.player_classified ~= nil then
         return inst.player_classified.moisture:value()
+    else
+        return 0
+    end
+end
+
+-- 官方 components/moisture.lua:171-172 GetMoisturePercent = moisture / maxmoisture。
+-- 玩家潮湿比例与世界潮湿（TheWorld.state.wetness）是两套数据：客机读两个 netvar。
+fns.GetMoisturePercent = function(inst)
+    if inst.components.moisture ~= nil then
+        return inst.components.moisture:GetMoisturePercent()
+    elseif inst.player_classified ~= nil then
+        local classified = inst.player_classified
+        local maxmoisture = classified.maxmoisture and classified.maxmoisture:value() or 0
+        local moisture = classified.moisture and classified.moisture:value() or 0
+        return maxmoisture > 0 and moisture / maxmoisture or 0
     else
         return 0
     end
@@ -846,6 +874,8 @@ function PlayerUtil:Reset()
     self._inherent_tags = {}
     self._components = {}
     self._client_fake_lights = nil
+    self._light_baseline_item = nil
+    self._light_baseline = nil
     if self._bound_player then
         fns.UnregisterPlayerEvents(self._bound_player)
     end
@@ -977,6 +1007,13 @@ function PlayerUtil:GetCombat()
     return ThePlayer and ThePlayer.replica and ThePlayer.replica.combat
 end
 
+-- 玩家 talker 是官方 common 段添加的本地组件（player_common.lua:2487），客户端可读。
+-- Say 钩子挂在组件实例上，必须取当下实体的实时组件：GetComponent 优先返回 Init 快照，
+-- 同 prefab 换实体（跨世界迁移）时 TryInit 不会 Reset，快照仍指向旧组件。
+function PlayerUtil:GetTalker()
+    return ThePlayer and ThePlayer.components and ThePlayer.components.talker
+end
+
 -- playercontroller 纯查询（动作执行 DoAction 与实例级 hook 不走这里）
 function PlayerUtil:IsAOETargeting()
     return fns.QueryController("IsAOETargeting", false)
@@ -1028,6 +1065,10 @@ end
 
 function PlayerUtil:GetMoisture()
     return fns.Query(fns.GetMoisture, 0)
+end
+
+function PlayerUtil:GetMoisturePercent()
+    return fns.Query(fns.GetMoisturePercent, 0)
 end
 
 function PlayerUtil:IsWet()
@@ -1245,6 +1286,74 @@ function PlayerUtil:HasClientFakeLight()
     return false
 end
 
+-- ItemUtil 的分类方法是冒号定义（带 self），传给 FindEquipped 必须包一层命名闭包，
+-- 不能用 ItemUtil.IsLightSource 直接传引用；命名闭包也让谓词缓存 key 稳定。
+local function IsLightSourceItem(item)
+    return ItemUtil:IsLightSource(item)
+end
+
+-- 是否还需要自身光源保护（防鬼手）。autolight 的补装与 configutil 的 LIGHT 抑制
+-- 共用这一份判定、这一份基线，避免两个模块各自采样导致结论相反、灯被反复装/换。
+-- configutil 只调函数、不持有状态；基线是 PlayerUtil 实例字段，随 Reset/换人清空。
+-- 依据官方：player_common.lua:2446 光照阈值、grue.lua:57 夜视免疫、
+--           wisecracker.lua:557 GetTimeInDark() >= .5 的黑暗状态机。
+function PlayerUtil:NeedsLightProtection()
+    if not ThePlayer or not ThePlayer.LightWatcher then
+        return false
+    end
+    if WorldUtil:IsDay() then
+        return false
+    end
+    -- 夜视与官方 grue 的 nightvision 免疫一致；playervision 在 player_common.lua:2493
+    -- 的 common 段添加（SetPristine 之前），纯客户端可读；读不到时保守当无夜视。
+    local pv = self:GetComponent("playervision")
+    if pv ~= nil and pv.HasNightVision ~= nil and pv:HasNightVision() then
+        return false
+    end
+    -- 客户端本地假光只进本机光照网格，服务端 grue 仍按黑暗判定：一律按需要保护处理。
+    if self:HasClientFakeLight() then
+        return true
+    end
+
+    local held = InventoryUtil:FindEquipped(IsLightSourceItem)
+    if not held then
+        -- 非标准光源（无燃料 tag，如启迪之冠）：与 configutil 规则 2 同口径，
+        -- 从 LIGHT 分类候选（含用户临时加入分类的物品）里找当前已装备的那一件。
+        -- 否则会被当成"没举灯"走 GetTimeInDark 单开关，戴着发光头冠时自己点亮自己，
+        -- 判定立刻翻成"不需保护"，帽子覆盖头冠、头冠又被补装，形成反复切换。
+        local ac = self:GetComponent("actioncontroller")
+        local lights = ac and ac:GetItemsFromCategory("LIGHT")
+        if lights then
+            for _, item in pairs(InventoryUtil:GetEquips()) do
+                if table.contains(lights, item) then
+                    held = item
+                    break
+                end
+            end
+        end
+    end
+    if not held then
+        -- 灯已被其它装备换下：基线随之失效，避免重新装上时沿用旧基线反复让位
+        self._light_baseline_item, self._light_baseline = nil, nil
+        -- 没举灯：官方 LightWatcher 黑暗状态机直接给出外部光是否足够
+        return ThePlayer.LightWatcher:GetTimeInDark() > 0
+    end
+    -- 举着灯却不亮/已耗尽：需要补装，且清掉旧灯的基线
+    if held:HasTag("fueldepleted") or not ThePlayer:IsLightGreaterThan(LIGHT_THRESH) then
+        self._light_baseline_item, self._light_baseline = nil, nil
+        return true
+    end
+    -- 基线只在"换了一盏灯"时采样一次，避免逐帧漂移
+    if held ~= self._light_baseline_item then
+        self._light_baseline_item = held
+        self._light_baseline = ThePlayer.LightWatcher:GetLightValue()
+    end
+    if ThePlayer.LightWatcher:GetLightValue() - self._light_baseline > EXTERNAL_LIGHT_DELTA then
+        return false
+    end
+    return true
+end
+
 -- 是否在光亮环境（黑暗中鬼手持续扣血）。封装 EntityScript:IsInLight()。
 -- 有本地假光时保守返回"无光"：服务端 grue 看不到这盏灯，
 -- 按有光处理会让 autohelm / autocloth 顶掉头部唯一真实光源。
@@ -1259,6 +1368,7 @@ end
 -- 威胁检测（原 threatutil，供 autohelm / autocloth 复用）
 -- 是否有正在攻击本体的威胁（带 _combat 且攻击目标为 ThePlayer 的实体）。
 -- 避免两套自动装备在 HEAD/BODY 槽反复争夺。
+-- 只认场景内的实体：物品栏/容器里的生物已离场景，不能让护甲一直穿着。
 -- =============================================
 
 function PlayerUtil:CheckThreats()
@@ -1266,10 +1376,13 @@ function PlayerUtil:CheckThreats()
         return false
     end
     local x, y, z = ThePlayer.Transform:GetWorldPosition()
-    local ents = TheSim:FindEntities(x, y, z, THREAT_RANGE, { "_combat" })
+    local ents = TheSim:FindEntities(x, y, z, THREAT_RANGE, { "_combat" }, THREAT_CANT_TAGS)
     for i = 1, #ents do
-        if ents[i].replica and ents[i].replica.combat then
-            if ents[i].replica.combat:GetTarget() == ThePlayer and not ItemUtil:IsSleeping(ents[i]) then
+        local ent = ents[i]
+        -- 官方 Combat:IsValidTarget（scripts/components/combat_replica.lua:291）的客户端判据
+        if ent:IsValid() and ent.entity:IsVisible()
+                and ent.replica and ent.replica.combat then
+            if ent.replica.combat:GetTarget() == ThePlayer and not ItemUtil:IsSleeping(ent) then
                 return true
             end
         end
@@ -1299,7 +1412,7 @@ end
 -- 海洋地皮范围 GROUND.OCEAN_START(201) ~ GROUND.OCEAN_END(247)
 -- 返回 nil 表示无玩家或无法获取
 function PlayerUtil:GetGroundType()
-    if not ThePlayer then return nil end
+    if not ThePlayer or not TheWorld or not TheWorld.Map then return nil end
     local x, y, z = ThePlayer.Transform:GetWorldPosition()
     return TheWorld.Map:GetTileAtPoint(x, y, z)
 end
@@ -1358,6 +1471,11 @@ end
 -- =============================================
 -- 标签查询
 -- =============================================
+
+--- 玩家实体的标签查询（只用于玩家实体；物品标签走 ItemUtil:HasTag）
+function PlayerUtil:HasTag(player, tag)
+    return player ~= nil and player:HasTag(tag)
+end
 
 function PlayerUtil:GetInherentTags()
     self:TryInit()

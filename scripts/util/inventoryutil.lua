@@ -279,18 +279,25 @@ end
 -- @param prefab: 物品的prefab名称
 -- @param amount: 所需数量（可选）
 -- @param checkallcontainers: 是否跨所有容器统计（可选，对齐官方）
--- @return: 布尔值，表示是否拥有足够数量的物品
+-- @return: (是否足够, 实际数量)，与官方 Has 一致
+-- 官方 Has 返回 (是否足够, 实际数量) 两个值（inventory_classified.lua:341）。
+-- `return inventory and inventory:Has(...)` 会被 Lua 的 and 截断成只返回第一个值，
+-- 调用方拿不到数量，故必须显式分支后原样返回两个值。
+-- 库存副本取不到时的兜底也与官方 inventory_replica.lua:392 对齐（amount <= 0, 0）。
 function InventoryUtil:Has(prefab, amount, checkallcontainers)
     local inventory = self:GetInventory()
-    return inventory
-        and inventory:Has(prefab, amount, checkallcontainers)
+    if inventory == nil then return amount <= 0, 0 end
+    return inventory:Has(prefab, amount, checkallcontainers)
 end
 
 -- 检查是否拥有带指定标签的物品（官方 L396）
+-- @return: (是否足够, 实际数量)，与官方 HasItemWithTag 一致
+-- 官方 inventory_classified.lua:372 返回 (count >= amount, count)，
+-- 与 Has 同构，镜像层同样不能用 and 模板截断第二个返回值。
 function InventoryUtil:HasItemWithTag(tag, amount)
     local inventory = self:GetInventory()
-    return inventory
-        and inventory:HasItemWithTag(tag, amount)
+    if inventory == nil then return amount <= 0, 0 end
+    return inventory:HasItemWithTag(tag, amount)
 end
 
 -- 返回当前手持物品到库存（官方 L410）
@@ -534,6 +541,7 @@ function InventoryUtil:IsPlayerFree()
         and ThePlayer
         and not ThePlayer:HasTag("busy")
         and not (ThePlayer.sg ~= nil and ThePlayer.sg:HasStateTag("busy"))
+        and ThePlayer.components ~= nil
         and ThePlayer.components.playeractionpicker ~= nil
         and ThePlayer.components.playercontroller ~= nil
 end

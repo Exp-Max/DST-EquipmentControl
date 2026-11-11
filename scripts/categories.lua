@@ -256,12 +256,27 @@ end)
 -- 食物 (FOOD) - 杂类
 -- ==========================================
 Categories.FOOD:SetFn(function(item)
-    return not SpecialFood[item.prefab]
-        and ItemUtil:CanEat(item)
-        and (ItemUtil:GetHunger(item) > 0
-        and ItemUtil:GetHealth(item) >= 0
-        or (item:HasTag("monstermeat") and ThePlayer
-            and (ThePlayer.prefab == "webber" or ThePlayer.prefab == "wormwood")))
+    if SpecialFood[item.prefab] or not ItemUtil:CanEat(item) then
+        return false
+    end
+    if ThePlayer then
+        -- wathgrithr.lua:168：caneat 仍是 OMNI，preferseating 才是肉/好东西
+        if ThePlayer:HasTag("valkyrie")
+            and not (item:HasTag("edible_" .. FOODTYPE.MEAT)
+                or item:HasTag("edible_" .. FOODTYPE.GOODIES)) then
+            return false
+        end
+        -- warly.lua:36-37：官方自身也是这两个字面标签
+        if ThePlayer:HasTag("masterchef")
+            and not (item:HasTag("preparedfood") or item:HasTag("pre-preparedfood")) then
+            return false
+        end
+    end
+    -- 怪物肉：eater.lua:93-105 能力标签；webber.lua:54-57 pristine 预加；plantkin 保留 EC 原有 Wormwood 例外
+    return (ItemUtil:GetHunger(item) > 0 and ItemUtil:GetHealth(item) >= 0)
+        or (item:HasTag("monstermeat")
+        and ThePlayer
+        and (ThePlayer:HasTag("strongstomach") or ThePlayer:HasTag("eatsrawmeat")or ThePlayer:HasTag("plantkin")))
 end)
 
 Categories.FOOD:SetPriority(function(item)

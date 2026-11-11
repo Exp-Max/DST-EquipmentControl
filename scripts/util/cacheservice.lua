@@ -178,18 +178,30 @@ function CacheService:GetCachedItem(item)
     end
 
     MOD_EQUIPMENT_CONTROL.SPAWNING = true
-    local sim = TheWorld.ismastersim
-    TheWorld.ismastersim = true
+    local sim = TheWorld and TheWorld.ismastersim
+    if TheWorld then
+        TheWorld.ismastersim = true
+    end
 
-    local ok, clone = pcall(SpawnPrefab, item.prefab)
-    if ok and clone then
-        Cache[item.prefab] = CacheItem(clone)
+    -- 整段包 pcall：CacheItem 抛错时也必须还原全局标志，否则后续判定会一直以为自己是服务端
+    local ok, entry = pcall(function()
+        local clone = SpawnPrefab(item.prefab)
+        if clone == nil then return nil end
+        local data = CacheItem(clone)
         pcall(clone.Remove, clone)
+        return data
+    end)
+
+    if TheWorld then
+        TheWorld.ismastersim = sim
+    end
+    MOD_EQUIPMENT_CONTROL.SPAWNING = false
+
+    if ok and entry then
+        Cache[item.prefab] = entry
     else
         NegativeCache[item.prefab] = true
     end
-    TheWorld.ismastersim = sim
-    MOD_EQUIPMENT_CONTROL.SPAWNING = false
 
     return Cache[item.prefab]
 end

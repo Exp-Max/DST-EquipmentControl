@@ -108,10 +108,11 @@ local function ProcessArmorSlot(armor_category, hasActive)
         end
         if needsProtect then
             ProtectBackpackEquip(armor)
-        else
-            ConfigUtil:AutoEquip(armor_category, armor, true)
+            return true
         end
-        return true
+        -- 用统一入口的返回值：HEAD 光源硬保护挡住护甲帽时返回 false，
+        -- 让上层继续尝试身体护甲，而不是误判"头部护甲已就位"。
+        return ConfigUtil:AutoEquip(armor_category, armor, true)
     end
     return false
 end

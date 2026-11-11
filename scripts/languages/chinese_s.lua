@@ -176,6 +176,9 @@ GLOBAL.STRINGS.EQUIPMENT_CONTROL =
 
         CHEST_MEMORY_DISPLAY_MODE   = "箱子记忆显示模式：%s。",
         CHEST_MEMORY_DISPLAY_BUTTON = "切换显示模式（当前：%s）",
+
+        AUTO_SOUL_FIX_JAR_ON    = "自动刷分身已开启",
+        AUTO_SOUL_FIX_JAR_OFF   = "自动刷分身已关闭",
     },
 
     -- ========================================

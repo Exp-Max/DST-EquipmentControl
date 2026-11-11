@@ -405,9 +405,9 @@ local function Init()
             end
         end
 
-        -- 记录最近一次攻击时间：autolight 据此在攻击窗口内暂缓把光源装回 HANDS，
-        -- 避免光源与"攻击切出的预设武器"争夺 HANDS，导致武器刚切出又被顶掉。
-        MOD_EQUIPMENT_CONTROL._ec_last_attack = GetTime()
+        -- 战斗登记交给 configutil 统一调度（不再给 autolight 分发标记）：
+        -- 战斗期间 LIGHT 装备请求会被 IsSuppressed 挡住，黑暗宣告可解除。
+        ConfigUtil:NoteAttack()
 
         PlayerControllerDoAttackButton(self, retarget)
     end

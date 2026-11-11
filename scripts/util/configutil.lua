@@ -28,7 +28,8 @@ end
 --   3 自动衣服：过冷/过热持续扣血、潮湿失温
 --   4 自动手杖：仅加速跑图
 -- 保命例外：无光环境下头部唯一光源不可被护甲覆盖（黑暗约每 5 秒 100 鬼手伤害），
---   该判定不参与等级比较，由 autohelm 的 CanEquipArmor 用官方 IsInLight() 在无光环境下硬保护。
+--   该判定不参与等级比较，由 AutoEquip 的 HEAD 硬保护统一兜底（含 force 路径）；
+--   autohelm 的 CanEquipArmor 对标准光源仍保留一份同向的即时保护。
 -- 未列出的分类（武器/工具/护符/快速动作/部署/勋章/伍迪变形还原）按事件需要放行，
 -- 只做通用校验，不参与等级仲裁。
 local RANK = {
@@ -57,6 +58,19 @@ local function NeedsRainGear()
     return (WorldUtil:IsRaining() or WorldUtil:IsAcidRaining()) and not WorldUtil:IsLunarhailing()
 end
 
+-- 战斗状态由 configutil 统一持有：autoweapon 攻击时登记，黑暗宣告时解除。
+-- 自动模块之间不互相分发标记；是否允许装备一律由 IsSuppressed 裁决。
+local combat_active = false
+
+function ConfigUtil:NoteAttack()
+    combat_active = true
+end
+
+function ConfigUtil:NoteEnterDark()
+    -- 官方 ANNOUNCE_ENTER_DARK 意味着该停手防鬼手：解除战斗抑制，让 LIGHT 当帧能切回
+    combat_active = false
+end
+
 -- 是否有更高等级的条件正在生效。
 -- 每条约束都读 AUTO_EQUIP 开关：关掉对应功能，约束自动取消，低级模块不再被挡。
 local function IsSuppressed(requester, slot)
@@ -64,20 +78,28 @@ local function IsSuppressed(requester, slot)
     if not rank then return false end
     local ae = MOD_EQUIPMENT_CONTROL.AUTO_EQUIP
 
+    -- 0) 战斗期间统一抑制自动光源的装备请求：武器占 HANDS，没有时间窗口。
+    --    状态由 NoteAttack/NoteEnterDark 维护；宣告解除后放行一次，继续攻击又重新抑制。
+    --    与规则 2（保护光源槽不被衣物/手杖顶掉）方向相反，二者互不冲突。
+    if requester == "LIGHT" and combat_active then
+        return true
+    end
+
     -- 1) 战斗护甲：护甲开关开着且有威胁时，环境衣物让出"护甲实际占据的槽"给护甲/武器；
     --    多格装备栏下衣物/护甲各占独立槽则不冲突，故按槽位感知（见 InventoryUtil:GetEquippedSlotsOf），无默认兜底。
     if rank == 3 and (ae.ARMORHAT == true or ae.ARMORBODY == true) and PlayerUtil:CheckThreats()
        and InventoryUtil:GetEquippedSlotsOf(function(i) return ItemUtil:IsArmor(i) end)[slot] then
         return true
     end
-    -- 2) 自动光源：非白天且该槽当前由光源占据时，衣物/手杖不覆盖（鬼手伤害）。
-    --    纯即时判定：autolight 的三态模型会在外部光/天光已保护时卸下自身光源，
-    --    所以"槽上还举着光源"本身就意味着当前靠它防鬼手，无需跨模块状态标记。
+    -- 2) 自动光源：PlayerUtil:NeedsLightProtection() 是 autolight 与此处共用的唯一判定。
+    --    白天/夜视/外部光已保护 → false（放行，手杖/雨具自然把光源"换"回物品栏）；
+    --    假光、黑暗、举着正在发光的光源 → true（保留槽位防鬼手）。
+    --    configutil 不持有状态：判定和基线都在 PlayerUtil 内部，与约束 1/3/4 一样只调函数，
+    --    两个调用方不会因各自采样基线而给出相反结论。
     --    也不能用 not IsInLight() 反推无光：光源装上后玩家被自己点亮，该条件会立刻失效。
-    --    白天直接放行，避免玩家手动举火把时连自动手杖都被一起挡掉。
     --    与约束 1/3 一致，直接用 InventoryUtil 的装备栏检查做槽位感知；
     --    谓词判"是否属于整个 LIGHT 分类"（GetItemsFromCategory 已含临时光源）。
-    if rank >= 3 and ae.LIGHT == true and not WorldUtil:IsDay() then
+    if rank >= 3 and ae.LIGHT == true and PlayerUtil:NeedsLightProtection() then
         local ac = PlayerUtil:GetComponent("actioncontroller")
         local lights = ac and ac:GetItemsFromCategory("LIGHT")
         if InventoryUtil:GetEquippedSlotsOf(function(item)
@@ -117,6 +139,19 @@ function ConfigUtil:AutoEquip(requester, item, avoidDuplicate, force)
 
     -- slot 取物品实际装备槽（含自定义槽，经 replica 同步）：据此做槽位感知的等级仲裁（见 IsSuppressed）。
     local slot = ItemUtil:GetEquipSlot(item)
+    -- 保命例外（不参与等级比较，force 也不绕过）：夜间 HEAD 上仍是 LIGHT 分类光源时，
+    -- 衣物帽/护甲帽一律不得覆盖；否则 autolight 立刻补装头冠、帽子又把它换下，
+    -- 启迪之冠这类非标准头部光源会与帽子反复互顶。autolight 自己的换灯不受此限。
+    if slot == EQUIPSLOTS.HEAD and requester ~= "LIGHT"
+            and MOD_EQUIPMENT_CONTROL.AUTO_EQUIP.LIGHT == true
+            and PlayerUtil:NeedsLightProtection() then
+        local ac = PlayerUtil:GetComponent("actioncontroller")
+        local lights = ac and ac:GetItemsFromCategory("LIGHT")
+        local head_item = InventoryUtil:GetEquippedItem(EQUIPSLOTS.HEAD)
+        if lights and head_item and table.contains(lights, head_item) then
+            return false
+        end
+    end
     if slot and not force then
         if IsSuppressed(requester, slot) then return false end
         local rule = AUTO_EQUIP_RULES[requester]

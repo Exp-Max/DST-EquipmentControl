@@ -832,14 +832,14 @@ local function SetupCookButtonHook(container_widget)
     end
     btn._ec_autocook_hooked = true
 
-    -- 包装 validfn：有暂存组合、或可快速重复时始终让按钮可点击
+    -- 包装 validfn：按住 Ctrl 的快速重复优先，否则有暂存组合时让按钮可点击
     local orig_validfn = btn.validfn
     btn.validfn = function(inst)
-        if pending_combo ~= nil and #pending_combo > 0 then
-            return true
-        end
         if CanFastRepeat(inst) then
             ScheduleFastRepeat(inst, btn)
+            return true
+        end
+        if pending_combo ~= nil and #pending_combo > 0 then
             return true
         end
         if orig_validfn ~= nil then
@@ -848,18 +848,11 @@ local function SetupCookButtonHook(container_widget)
         return false
     end
 
-    -- 包装 fn：面板暂存组合 > 快速重复上次组合 > 原生 COOK
+    -- 包装 fn：按住 Ctrl 只做上一道组合 > 面板暂存组合（仅空锅）> 原生 COOK。
+    -- 面板会在开锅/刷新档位时自动写入 pending_combo，若让它抢先，Ctrl 重复出来的
+    -- 就是「当前面板选中食谱」而不是上一道；锅里已有食材时也必须按锅内实际食材记录。
     local orig_fn = btn.fn
     btn.fn = function(inst, doer)
-        if pending_combo ~= nil and #pending_combo > 0 then
-            local combo = pending_combo
-            pending_combo = nil
-            pending_combos = nil
-            last_cook_combo = ComboPrefabs(combo) or last_cook_combo
-            FireCook(inst, combo)
-            return
-        end
-
         if CanFastRepeat(inst) then
             local entries = BuildComboEntries(last_cook_combo, BuildCensus(inst))
             if entries ~= nil and #entries > 0 then
@@ -868,8 +861,17 @@ local function SetupCookButtonHook(container_widget)
             return
         end
 
-        -- 原生点 COOK：记住锅里已填的食材，供下一次快速重复
         local pot_combo = ReadPotCombo(inst)
+        if pot_combo == nil and pending_combo ~= nil and #pending_combo > 0 then
+            local combo = pending_combo
+            pending_combo = nil
+            pending_combos = nil
+            last_cook_combo = ComboPrefabs(combo) or last_cook_combo
+            FireCook(inst, combo)
+            return
+        end
+
+        -- 原生点 COOK：记住锅里已填的食材，供下一次快速重复
         if pot_combo ~= nil then
             last_cook_combo = pot_combo
         end

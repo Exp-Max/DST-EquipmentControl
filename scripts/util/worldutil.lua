@@ -320,15 +320,15 @@ function WorldUtil:IsAcidRaining()
 end
 
 --------------------------------------------------
--- 湿度
+-- 湿度（世界湿度 TheWorld.state.*）
 --------------------------------------------------
 
--- 来源：官方：ThePlayer.components.moisture:GetMoisture()
+-- 来源：官方：TheWorld.state.moisture（components/worldstate.lua）
 function WorldUtil:GetMoisture()
     return self:GetState("moisture") or 0
 end
 
--- 来源：官方：ThePlayer.components.moisture:GetMoisture()
+-- 来源：官方：TheWorld.state.moistureceil（components/worldstate.lua）
 function WorldUtil:GetMoistureCeil()
     return self:GetState("moistureceil") or 0
 end
@@ -341,22 +341,6 @@ end
 -- 来源：官方：TheWorld.state.iswet
 function WorldUtil:IsWet()
     return self:GetState("iswet") or false
-end
-
--- 来源：官方：ThePlayer.components.moisture:GetMoisture()
-function WorldUtil:GetPlayerMoisture()
-    if not (ThePlayer and ThePlayer:IsValid() and ThePlayer.components.moisture) then
-        return 0
-    end
-    return ThePlayer.components.moisture:GetMoisture()
-end
-
--- 来源：官方：ThePlayer.components.moisture:GetWetness()
-function WorldUtil:GetPlayerWetness()
-    if not (ThePlayer and ThePlayer:IsValid() and ThePlayer.components.moisture) then
-        return 0
-    end
-    return ThePlayer.components.moisture:GetWetness()
 end
 
 --------------------------------------------------

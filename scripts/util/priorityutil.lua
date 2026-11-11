@@ -40,7 +40,7 @@ local function GetBaseHealthValue(item)
 end
 
 local function GetBaseHungerValue(item)
-    if item:HasTag("soul") and ThePlayer:HasTag("souleater") then
+    if item:HasTag("soul") and ThePlayer and ThePlayer:HasTag("souleater") then
         return TUNING.CALORIES_MEDSMALL
     end
 

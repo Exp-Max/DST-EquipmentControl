@@ -173,6 +173,16 @@ function SkillTreeUtil:GetActivatedSkillNames()
     return names
 end
 
+-- 来源：官方：scripts/prefabs/wortox.lua:251 RecalculateInclination（注释 "Server and Client ran."）
+-- 沃拓克斯倾向：官方客户端在 onactivateskill_client / ondeactivateskill_client 里按
+-- skilltree_wortox.lua:95 的 CalculateInclination 算好，写入 inst.wortox_inclination。
+-- 这里只做工具层封装，不二次推算；nil = 未倾斜的默认倾向，是官方合法返回值。
+-- 不调 TryInit：技能树组件就绪前字段也可能为 nil，那应按默认倾向处理而非当初始化失败。
+function SkillTreeUtil:GetInclination(player)
+    local p = player or ThePlayer
+    return p and p.wortox_inclination
+end
+
 -- =============================================
 -- 标签查询
 -- =============================================

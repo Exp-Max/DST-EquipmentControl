@@ -581,4 +581,160 @@ function ChestMemoryDisplay:OnUpdate(dt)
     end
 end
 
+--============================================================================
+-- 箱子记忆 widget 集合管理
+-- 实现集中在本文件；状态表由对接层通过 BindState 注入（即 MOD_EQUIPMENT_CONTROL.CM），
+-- 因此 CM.chest / CM.chestwidgets / self.ms 等既有访问方式全部保持不变。
+--============================================================================
+local state = nil
+
+function ChestMemoryDisplay.BindState(ms)
+    state = ms
+end
+
+function ChestMemoryDisplay.SetOpenedContainer(chest)
+    if state then state.openedchest = chest end
+end
+
+function ChestMemoryDisplay.AddWidget(owner, ms)
+    if not state or not owner or state.chest[owner]
+        or not owner:IsValid()
+        or not InventoryUtil:GetContainerReplica(owner) then
+        return
+    end
+    if not ThePlayer.HUD then return end
+
+    local widget = ChestMemoryDisplay(owner, ms)
+    widget.mobile = owner:IsValid()
+        and (owner:HasTag("locomotor") or owner:HasTag("_inventoryitem"))
+    ThePlayer.HUD:AddChild(widget)
+    widget:HandleWidgetDisplay()
+    state.chest[owner] = widget
+    table.insert(state.chestwidgets, widget)
+
+    if widget.mobile then
+        owner:ListenForEvent("onremove", function()
+            ChestMemoryDisplay.RemoveWidget(widget, true)
+            widget:Kill()
+            widget:StopUpdating()
+        end)
+    end
+end
+
+function ChestMemoryDisplay.RemoveWidget(_widget, chest_trigger)
+    if not state then return end
+    local owner, widget_num
+    for k, widget in pairs(state.chestwidgets) do
+        if widget == _widget then
+            owner = widget:GetOwner()
+            widget_num = k
+            break
+        end
+    end
+    if not chest_trigger and widget_num then
+        state.chestwidgets[widget_num]:DoRemove()
+    end
+    if widget_num then
+        if _widget.mobile and owner ~= nil then
+            local prefab = owner.prefab
+            local pos = owner:GetPosition()
+            local x = pos and tonumber(string.format("%.1f", pos.x))
+            local z = pos and tonumber(string.format("%.1f", pos.z))
+            for k, info in pairs(state.data) do
+                if info.mobile and info.prefab == prefab
+                    and (info.x == nil or x == nil or math.abs(info.x - x) < 2)
+                    and (info.z == nil or z == nil or math.abs(info.z - z) < 2) then
+                    state:RemoveData(k)
+                end
+            end
+        end
+        table.remove(state.chestwidgets, widget_num)
+    end
+    if owner then
+        state.chest[owner] = nil
+    end
+end
+
+-- 清空集合时保留表本身：CM.chest / CM.chestwidgets 是外部直接读的引用，不能替换成新表。
+function ChestMemoryDisplay.RemoveAllWidgets()
+    if not state then return end
+    for _, widget in pairs(state.chestwidgets) do
+        local owner = widget:GetOwner()
+        if owner ~= nil and owner:IsValid() and owner.AnimState ~= nil then
+            owner.AnimState:SetAddColour(0, 0, 0, 0)
+        end
+        widget:DoRemove()
+    end
+    for k in pairs(state.chest) do state.chest[k] = nil end
+    for i = #state.chestwidgets, 1, -1 do state.chestwidgets[i] = nil end
+    state.highlightedchest = nil
+end
+
+-- 按当前镜头批量重算所有箱子预览的位置与显隐。
+function ChestMemoryDisplay.RefreshAllWidgets()
+    if not state then return end
+    for _, widget in pairs(state.chestwidgets) do
+        widget:HandleWidgetDisplay()
+    end
+end
+
+function ChestMemoryDisplay.SetAndPushDisplayType(display_type)
+    if not state then return end
+    state.displaytype = display_type
+    for _, widget in pairs(state.chestwidgets) do
+        widget:UpdateDisplayType()
+    end
+    ChestMemoryDisplay.RefreshAllWidgets()
+end
+
+function ChestMemoryDisplay.ChangeHighlighting(bool, item_prefab)
+    if not state then return end
+    for _, widget in pairs(state.chestwidgets) do
+        widget:HighlightWithItem(bool, item_prefab)
+    end
+end
+
+-- 数据加载完成后刷新已在场的 widget（原先写在 CM:LoadData 的异步回调里）。
+function ChestMemoryDisplay.OnDataLoaded()
+    if not state then return end
+    for _, widget in pairs(state.chestwidgets) do
+        local has_existing_data = false
+        for __, __v in pairs(widget.CS_contents) do
+            has_existing_data = true
+        end
+        if not has_existing_data then
+            local observed_contents = widget._olditemtrigger and widget.CS_contents or nil
+            widget:LoadChestData()
+            if observed_contents ~= nil then
+                widget._olditems = widget.CS_contents
+                widget._olditemtrigger = true
+                widget.CS_contents = observed_contents
+                widget:RefreshItems()
+            end
+        end
+        if state.openedchest == widget:GetOwner() then
+            widget:OnContainerOpened()
+        end
+    end
+end
+
+local function UpdateWidgetData(widget)
+    local owner = widget:GetOwner()
+    if owner ~= nil and owner:IsValid() then
+        widget:UpdateSavedData()
+    end
+end
+
+-- 落盘前把 widget 的最新快照回写到数据层（原先写在 CM:SaveData 里）。
+function ChestMemoryDisplay.CollectSavedData(widget)
+    if not state then return end
+    if widget ~= nil then
+        UpdateWidgetData(widget)
+    else
+        for _, w in pairs(state.chestwidgets) do
+            UpdateWidgetData(w)
+        end
+    end
+end
+
 return ChestMemoryDisplay

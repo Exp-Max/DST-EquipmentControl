@@ -26,12 +26,12 @@
 
 ### 多语言拆分
 
-`scripts/equipment_control_strings.lua` → `scripts/language/` 目录：
+`scripts/equipment_control_strings.lua` → `scripts/languages/` 目录：
 
 | 文件 | 说明 |
 |------|------|
-| `language/chinese_s.lua` | 简体中文，`return { CONFIG = {...}, HOVERS = {...} }` |
-| `language/english.lua` | 英文兜底，同上结构 |
+| `languages/chinese_s.lua` | 简体中文，`return { CONFIG = {...}, HOVERS = {...} }` |
+| `languages/english.lua` | 英文兜底，同上结构 |
 
 `modimport` 按 `Language` 动态加载对应文件并写入 `STRINGS.EQUIPMENT_CONTROL`，
 命名规范与游戏本体（`chinese_s.po` / `english.po` 等）一致。
@@ -54,7 +54,7 @@
 - 两个滑条去掉多余的 `fn`（框架已自动 `CONFIG[value_key] = newval`），与 GRIDALIGN 滑条一致
 - `label_format` 改用 `MOD_EQUIPMENT_CONTROL.STRINGS` 取文案
 
-`scripts/language/chinese_s.lua` / `scripts/language/english.lua`：新增 `DODGE_AUTO` 键
+`scripts/languages/chinese_s.lua` / `scripts/languages/english.lua`：新增 `DODGE_AUTO` 键
 
 `modmain.lua:10`：`modimport(...)` → `STRINGS.EQUIPMENT_CONTROL = modimport(...)`
 

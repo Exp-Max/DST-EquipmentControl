@@ -10,10 +10,12 @@
 --     · DoAction           普通点击 / 排队论主机端 SendAction / 客机端 DoAction
 --                           / 空格以外的动作键 / 各模块自调的 DoAction
 --     · GetActionButtonAction  空格键（DoActionButton 不经 DoAction）
---     · 点击 RPC           绕过 DoAction 直接发 RPC 的模组（Exp_Max 的"中键灵魂跳跃"
+--     · 点击 RPC           绕过 DoAction 直接发 RPC 的模组（autosoul 的"中键灵魂跳跃"
 --                          就是这条：SendRPCToServer(RPC.LeftClick, ACTIONS.BLINK.code)）
 --   三条派发路径上，策略只有这一份，各路径行为不会互相不一致。
---   ⚠ 第三条（rpc 层）**也计数**：那条路径没有对应的 press，不计数就等于永久放行。
+--   ⚠ rpc 层不计数：双击策略只在 press 层生效（第一次 press 被吞，第二次才放行）。
+--     中键模块直接发的 LeftClick RPC 不会被要求点两次；关闭「沃拓克斯跳跃」后
+--     press 层已放行灵魂跳跃，rpc 层也不会再把第一次右键的 RPC 吞掉。
 --
 -- 配置一律**实时**读 MOD_EQUIPMENT_CONTROL.CONFIG（confighud 运行时改写后立即生效），
 -- 只有双击间隔读 modinfo —— 那是开局设定，运行中不可改。
@@ -114,15 +116,16 @@ local function IsBlink(ctx)
     return id == "BLINK"
 end
 
---- 计数的来源白名单（语义见 actionutil 文件头通道 H）。
+--- 计数的来源白名单（语义见 actionutil 文件头通道 H）：只在 press 层计数。
 ---   "press" 真实按下：DoAction 系（鼠标左右键 / 排队论 / 各模块自调 DoAction）
----   "rpc"   绕过 DoAction 直接发的点击 RPC（Exp_Max 的"中键灵魂跳跃"就是这条）
----           —— 它没有对应的 press，这里不计数就等于永久无条件放行；
----           而 press 已计过数、由 preview_cb 发出的那种 RPC，到达 rpc 层时计数已归零，
----           天然不会被重复扣（BlockBlink 只在计数 > 0 时才递减）。
+---   "rpc"   绕过 DoAction 直接发的点击 RPC，一律不计数：
+---           · autosoul 中键灵魂跳跃是 LeftClick RPC，没有对应 press，计数就等于要按两次中键；
+---           · 关闭「沃拓克斯跳跃」时 press 层已放行灵魂跳跃，rpc 层再计数就会把
+---             第一次右键发出的 RPC 吞掉，等于关了开关还要点两下。
+---           press 层放行后发出的 RPC 到这里直接放行，双击策略完全由 press 层决定。
 --- "button"（GetActionButtonAction 被反复轮询）与 "hover"（只读）一律不计数。
 local function IsCountingSource(source)
-    return source == "press" or source == "rpc"
+    return source == "press"
 end
 
 --- 屏蔽器：BLINK 的精准拦截
@@ -156,8 +159,9 @@ local function BlockBlink(ctx)
 end
 
 --============================================================================
--- 悬停提示的隐藏：直接问屏蔽器，保证"显示"与"实际拦截"同源
--- （source="hover" 是只读查询，不会消耗双击计数）
+-- 悬停提示的隐藏：由 TELEPOOF_HOVER 独立决定，不依赖"动作是否会被拦截"。
+-- 旧实现问屏蔽器，而 BlockBlink 只在禁用传送 / 双击计数未归零时才返回 true，
+-- 导致隐藏悬浮开关在传送启用时形同虚设。这里只认动作本身是不是 BLINK。
 --============================================================================
 local function InstallHoverOverride(pc)
     if pc == nil or pc._ec_telepoof_hover_hooked then return end
@@ -166,10 +170,7 @@ local function InstallHoverOverride(pc)
     local _GetRightMouseAction = pc.GetRightMouseAction
     pc.GetRightMouseAction = function(self, ...)
         local act = _GetRightMouseAction(self, ...)
-        if act ~= nil and IsHoverHidden()
-            and ActionUtil:IsActionBlockedFor(self.inst, {
-                source = "hover", buffaction = act, right = true,
-            }) then
+        if act ~= nil and IsHoverHidden() and IsBlink({ action = act.action }) then
             return nil  -- 隐藏"右键: 传送"提示
         end
         return act

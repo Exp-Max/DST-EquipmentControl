@@ -15,7 +15,7 @@ local MOD_EQUIPMENT_CONTROL                = {}
     -- 按游戏语言加载对应语言文件。
     -- 注意：modmain 环境里并不保证存在全局 Language（CHANGELOG 已记：strict 下 'Language' is not declared），
     -- 直接用它恒为 nil，会永远落到 english.lua，导致你做的 chinese_s.lua 翻译从不被加载。
-    -- 改用 LOC.GetLocaleCode() 取真实语言码，再映射到 scripts/language/ 下的实际文件名。
+    -- 改用 LOC.GetLocaleCode() 取真实语言码，再映射到 scripts/languages/ 下的实际文件名。
     local ec_lang = (GLOBAL.LOC ~= nil and GLOBAL.LOC.GetLocaleCode ~= nil and GLOBAL.LOC.GetLocaleCode())
             or (type(Language) == "string" and Language:lower())
             or "en"
@@ -23,10 +23,10 @@ local MOD_EQUIPMENT_CONTROL                = {}
         zh  = "chinese_s", zhr = "chinese_s", chs = "chinese_s",   -- 简体各变体
         zht = "chinese_s", cht = "chinese_s",                       -- 暂无 chinese_t.lua，先复用简体
     })[ec_lang] or "english"
-    modimport("scripts/language/" .. EC_LANG_FILE .. ".lua")
+    modimport("scripts/languages/" .. EC_LANG_FILE .. ".lua")
     -- 兜底：若对应语言文件缺失（如未来新增但未提供的变体），退回英文，避免 STRINGS 为 nil 引发崩溃
     if STRINGS.EQUIPMENT_CONTROL == nil then
-        modimport("scripts/language/english.lua")
+        modimport("scripts/languages/english.lua")
     end
     MOD_EQUIPMENT_CONTROL.STRINGS        = STRINGS.EQUIPMENT_CONTROL
     MOD_EQUIPMENT_CONTROL.SPAWNING       = false
@@ -210,10 +210,9 @@ local AlwaysLoad = {
     "Auto/autocloth",
     "Auto/woodieregear",
 }
-modimport("scripts/Auto/quickmove")
 modimport("scripts/Auto/caveclock")
 modimport("scripts/Auto/quickdeploy")
-modimport("scripts/Auto/altarfinder")
+modimport("scripts/Auto/autoaltar")
 modimport("scripts/Auto/wagstaffgiver")
 modimport("scripts/Auto/autotool")
 modimport("scripts/Auto/automedal")
@@ -224,6 +223,7 @@ modimport("scripts/Auto/mapteleport")
 modimport("scripts/Auto/gridalign")
 modimport("scripts/Auto/autocontainer")
 modimport("scripts/Auto/boulderdodge")
+modimport("scripts/Auto/autosoul")
 local function OnPlayerActivated(_, player)
     if player ~= ThePlayer then return end
 

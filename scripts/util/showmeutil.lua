@@ -290,7 +290,9 @@ function ShowMeUtil.Init()
     local function AttachListener(prefab)
         local old_hint
         prefab:ListenForEvent("showme_hint_dirty2", function(player_classified)
-            local raw = player_classified.net_showme_hint2:value()
+            local raw = player_classified.net_showme_hint2
+                and player_classified.net_showme_hint2:value()
+            if type(raw) ~= "string" then return end
             local guid = _ec_GetHintGUID(raw)
 
             local inst = Ents[guid]

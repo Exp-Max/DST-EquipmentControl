@@ -163,6 +163,9 @@ GLOBAL.STRINGS.EQUIPMENT_CONTROL =
 
         CHEST_MEMORY_DISPLAY_MODE   = "Chest memory display mode: %s.",
         CHEST_MEMORY_DISPLAY_BUTTON = "Switch display mode (current: %s)",
+
+        AUTO_SOUL_FIX_JAR_ON    = "Auto soul jar refresh enabled",
+        AUTO_SOUL_FIX_JAR_OFF   = "Auto soul jar refresh disabled",
     },
 
     KEYBINDS =
